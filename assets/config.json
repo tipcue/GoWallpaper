@@ -1,0 +1,6 @@
+{
+  "videoPath": "assets/wallpaper.mp4",
+  "mode": "cover",
+  "loop": true,
+  "fpsLimit": 30
+}
