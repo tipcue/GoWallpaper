@@ -54,11 +54,11 @@ func main() {
 
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
-		log.Fatalf("livewallpaper: load config: %v", err)
+		log.Fatalf("livewallpaper: load config: %%v", err)
 	}
 
 	if err := run(cfg); err != nil {
-		log.Fatalf("livewallpaper: %v", err)
+		log.Fatalf("livewallpaper: %%v", err)
 	}
 }
 
@@ -67,13 +67,13 @@ func run(cfg *Config) error {
 	// ── 1. Open video decoder ────────────────────────────────────────────────
 	dec, err := video.Open(cfg.VideoPath, video.PixelFormatRGBA)
 	if err != nil {
-		return fmt.Errorf("open video %q: %w", cfg.VideoPath, err)
+		return fmt.Errorf("open video %%q: %%w", cfg.VideoPath, err)
 	}
 	defer dec.Close()
 
 	// ── 2. Initialise GLFW ───────────────────────────────────────────────────
 	if err := glfw.Init(); err != nil {
-		return fmt.Errorf("glfw init: %w", err)
+		return fmt.Errorf("glfw init: %%w", err)
 	}
 	defer glfw.Terminate()
 
@@ -91,42 +91,42 @@ func run(cfg *Config) error {
 
 	glfwWin, err := glfw.CreateWindow(winW, winH, "livewallpaper", nil, nil)
 	if err != nil {
-		return fmt.Errorf("create glfw window: %w", err)
+		return fmt.Errorf("create glfw window: %%w", err)
 	}
 	glfwWin.MakeContextCurrent()
 
 	// ── 3. Reparent into WorkerW ─────────────────────────────────────────────
 	hwnd, err := win.HWNDFromGLFW(glfwWin)
 	if err != nil {
-		return fmt.Errorf("get hwnd: %w", err)
+		return fmt.Errorf("get hwnd: %%w", err)
 	}
 
 	workerW, err := win.FindOrCreateWorkerW()
 	if err != nil {
-		return fmt.Errorf("find workerw: %w", err)
+		return fmt.Errorf("find workerw: %%w", err)
 	}
 
 	win.ApplyChildStyle(hwnd)
 
 	if err := win.SetParentToWorkerW(hwnd, workerW); err != nil {
-		return fmt.Errorf("set parent: %w", err)
+		return fmt.Errorf("set parent: %%w", err)
 	}
 
 	if err := win.MakeFullscreen(hwnd); err != nil {
-		return fmt.Errorf("make fullscreen: %w", err)
+		return fmt.Errorf("make fullscreen: %%w", err)
 	}
 
 	glfwWin.Show()
 
 	// ── 4. Initialise OpenGL ─────────────────────────────────────────────────
 	if err := gl.Init(); err != nil {
-		return fmt.Errorf("gl init: %w", err)
+		return fmt.Errorf("gl init: %%w", err)
 	}
 
 	scaleMode := parseScaleMode(cfg.Mode)
 	renderer, err := glrender.New(winW, winH, scaleMode)
 	if err != nil {
-		return fmt.Errorf("create renderer: %w", err)
+		return fmt.Errorf("create renderer: %%w", err)
 	}
 	defer renderer.Close()
 
@@ -145,13 +145,13 @@ func run(cfg *Config) error {
 			if err == io.EOF {
 				if cfg.Loop {
 					if seekErr := dec.Seek(); seekErr != nil {
-						return fmt.Errorf("seek for loop: %w", seekErr)
+						return fmt.Errorf("seek for loop: %%w", seekErr)
 					}
 					continue
 				}
 				break
 			}
-			return fmt.Errorf("read frame: %w", err)
+			return fmt.Errorf("read frame: %%w", err)
 		}
 
 		renderer.Upload(frame.Data, frame.Width, frame.Height)
@@ -187,6 +187,13 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.FPSLimit <= 0 {
 		cfg.FPSLimit = 30
 	}
+
+	// Resolve VideoPath relative to the config file directory.
+	if cfg.VideoPath != "" && !filepath.IsAbs(cfg.VideoPath) {
+		baseDir := filepath.Dir(path)
+		cfg.VideoPath = filepath.Clean(filepath.Join(baseDir, cfg.VideoPath))
+	}
+
 	return &cfg, nil
 }
 
