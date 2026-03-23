@@ -104,16 +104,33 @@ func (r *Renderer) setupTexture() {
 // Upload copies an RGBA frame into the GPU texture.
 // frameW and frameH are the frame dimensions in pixels; data must be
 // frameW×frameH×4 bytes in row-major order.
+// Upload copies an RGBA frame into the GPU texture.
+// frameW and frameH are the frame dimensions in pixels; data must be
+// frameW×frameH×4 bytes in row-major order.
 func (r *Renderer) Upload(data []byte, frameW, frameH int) {
-	r.frameW = frameW
-	r.frameH = frameH
-
 	gl.BindTexture(gl.TEXTURE_2D, r.texture)
-	gl.TexImage2D(
-		gl.TEXTURE_2D, 0, gl.RGBA,
-		int32(frameW), int32(frameH), 0,
+
+	// Reallocate texture storage only when the frame size changes.
+	if frameW != r.frameW || frameH != r.frameH {
+		r.frameW = frameW
+		r.frameH = frameH
+
+		// Allocate (or re-allocate) storage without uploading data.
+		gl.TexImage2D(
+			gl.TEXTURE_2D, 0, gl.RGBA,
+			int32(frameW), int32(frameH), 0,
+			gl.RGBA, gl.UNSIGNED_BYTE, nil,
+		)
+	}
+
+	// Upload pixels into existing storage.
+	gl.TexSubImage2D(
+		gl.TEXTURE_2D, 0,
+		0, 0,
+		int32(frameW), int32(frameH),
 		gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(data),
 	)
+
 	gl.BindTexture(gl.TEXTURE_2D, 0)
 }
 
