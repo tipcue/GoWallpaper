@@ -275,6 +275,22 @@ func main() {
 	}
 	updateButtons()
 
+	// OnStop is called from a background goroutine when the engine exits for any
+	// reason (natural video end, Stop button, or init error).
+	// Fyne widget methods are goroutine-safe so we update the UI directly.
+	// The Apply button is only re-enabled if there is a valid selection;
+	// the click handler also guards this, so enabling it is always safe.
+	eng.OnStop = func() {
+		statusLabel.SetText("Status: Stopped")
+		stopBtn.Disable()
+		// Re-enable Apply only when a file is selected. selectedID is written
+		// exclusively from the fyne event goroutine, so reading it here is safe
+		// on all supported platforms (int read is atomic on amd64/arm64).
+		if selectedID >= 0 {
+			applyBtn.Enable()
+		}
+	}
+
 	w.SetContent(container.NewBorder(header, nil, nil, nil, fileList))
 
 	w.SetCloseIntercept(func() {

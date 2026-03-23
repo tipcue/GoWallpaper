@@ -26,6 +26,12 @@ type Engine struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	// OnStop, if non-nil, is called from a background goroutine whenever the
+	// render loop exits for any reason (natural end-of-video, Stop() call, or
+	// init error). Fyne widget methods (SetText, Enable, Disable) are
+	// goroutine-safe and may be called directly inside this function.
+	OnStop func()
 }
 
 // Start launches (or restarts) the wallpaper engine with the given config.
@@ -58,6 +64,30 @@ func (e *Engine) Start(cfg *Config) error {
 		runEngine(ctx, cfg, initResult)
 	}()
 
+	// Cleanup goroutine: once the render goroutine exits (for any reason),
+	// clear the engine state so Running() is accurate and fire OnStop.
+	go func() {
+		<-done // wait for render goroutine to finish
+
+		e.mu.Lock()
+		// Guard against a concurrent Start() that has already replaced e.done.
+		// Capture onStop inside the guard so it belongs to this engine run.
+		var onStop func()
+		if e.done == done {
+			onStop = e.OnStop
+			if e.cancel != nil {
+				e.cancel()
+				e.cancel = nil
+			}
+			e.done = nil
+		}
+		e.mu.Unlock()
+
+		if onStop != nil {
+			onStop()
+		}
+	}()
+
 	// Block until the engine has finished starting up.
 	return <-initResult
 }
@@ -71,10 +101,27 @@ func (e *Engine) Stop() {
 }
 
 // Running reports whether the engine is currently rendering.
+// It is accurate even if the render goroutine has exited naturally between
+// the last Stop() call and the next cleanup goroutine execution.
 func (e *Engine) Running() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.done != nil
+	if e.done == nil {
+		return false
+	}
+	// Non-blocking check: if the channel is already closed the goroutine has
+	// exited. Update state immediately so callers always see the truth.
+	select {
+	case <-e.done:
+		if e.cancel != nil {
+			e.cancel()
+			e.cancel = nil
+		}
+		e.done = nil
+		return false
+	default:
+		return true
+	}
 }
 
 // stopLocked cancels the context and waits for the goroutine to exit.
