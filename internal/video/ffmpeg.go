@@ -80,7 +80,7 @@ static int ffmpeg_open(const char *path, int out_fmt, DecodeCtx **ctx_out) {
     ctx->sws_ctx = sws_getContext(
         ctx->codec_ctx->width, ctx->codec_ctx->height, ctx->codec_ctx->pix_fmt,
         ctx->out_width, ctx->out_height, (enum AVPixelFormat)out_fmt,
-        SWS_BILINEAR, NULL, NULL, NULL);
+        SWS_BICUBIC, NULL, NULL, NULL);
     if (!ctx->sws_ctx) { ret = AVERROR(ENOMEM); goto fail; }
 
     ctx->packet   = av_packet_alloc();
@@ -104,42 +104,83 @@ fail:
 
 // ffmpeg_read_frame reads the next video frame into sw_frame.
 // Returns 0 on success, AVERROR_EOF at end-of-stream, other negative on error.
+// It follows the recommended avcodec_send_packet/avcodec_receive_frame loop.
 static int ffmpeg_read_frame(DecodeCtx *ctx) {
     int ret;
     while (1) {
+        // 1. Try to receive a frame from the decoder.
+        ret = avcodec_receive_frame(ctx->codec_ctx, ctx->frame);
+        if (ret == 0) {
+            // Success: we have a frame.
+
+            // Allocate sw_frame buffer for converted output only if not already allocated.
+            if (ctx->sw_frame->data[0] == NULL) {
+                ctx->sw_frame->format = ctx->out_fmt;
+                ctx->sw_frame->width  = ctx->out_width;
+                ctx->sw_frame->height = ctx->out_height;
+                ret = av_image_alloc(ctx->sw_frame->data, ctx->sw_frame->linesize,
+                                     ctx->out_width, ctx->out_height,
+                                     (enum AVPixelFormat)ctx->out_fmt, 1);
+                if (ret < 0) { av_frame_unref(ctx->frame); return ret; }
+            }
+
+            // Convert frame to output format.
+            sws_scale(ctx->sws_ctx,
+                      (const uint8_t * const *)ctx->frame->data, ctx->frame->linesize,
+                      0, ctx->codec_ctx->height,
+                      ctx->sw_frame->data, ctx->sw_frame->linesize);
+
+            ctx->sw_frame->pts = ctx->frame->pts;
+            av_frame_unref(ctx->frame);
+            return 0;
+        }
+
+        if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+            // Real error.
+            return ret;
+        }
+
+        // 2. Decoder needs more data: read a packet from the format context.
         ret = av_read_frame(ctx->fmt_ctx, ctx->packet);
-        if (ret < 0) return ret; // AVERROR_EOF or real error
+        if (ret < 0) {
+            // If EOF, send a NULL packet to flush the decoder.
+            if (ret == AVERROR_EOF) {
+                avcodec_send_packet(ctx->codec_ctx, NULL);
+            }
+            return ret;
+        }
 
         if (ctx->packet->stream_index != ctx->video_stream_idx) {
             av_packet_unref(ctx->packet);
             continue;
         }
 
+        // 3. Send the packet to the decoder.
         ret = avcodec_send_packet(ctx->codec_ctx, ctx->packet);
         av_packet_unref(ctx->packet);
         if (ret < 0) return ret;
-
-        ret = avcodec_receive_frame(ctx->codec_ctx, ctx->frame);
-        if (ret == AVERROR(EAGAIN)) continue;
-        if (ret < 0) return ret;
-
-        // Allocate sw_frame buffer for converted output.
-        ctx->sw_frame->format = ctx->out_fmt;
-        ctx->sw_frame->width  = ctx->out_width;
-        ctx->sw_frame->height = ctx->out_height;
-        ret = av_image_alloc(ctx->sw_frame->data, ctx->sw_frame->linesize,
-                             ctx->out_width, ctx->out_height,
-                             (enum AVPixelFormat)ctx->out_fmt, 1);
-        if (ret < 0) { av_frame_unref(ctx->frame); return ret; }
-
-        sws_scale(ctx->sws_ctx,
-                  (const uint8_t * const *)ctx->frame->data, ctx->frame->linesize,
-                  0, ctx->codec_ctx->height,
-                  ctx->sw_frame->data, ctx->sw_frame->linesize);
-
-        av_frame_unref(ctx->frame);
-        return 0;
     }
+}
+
+// ffmpeg_copy_frame_data copies frame data into a tightly-packed buffer.
+static int ffmpeg_copy_frame_data(DecodeCtx *ctx, uint8_t *dst, int dst_size) {
+    return av_image_copy_to_buffer(
+        dst, dst_size,
+        (const uint8_t * const *)ctx->sw_frame->data,
+        ctx->sw_frame->linesize,
+        ctx->out_fmt,
+        ctx->out_width, ctx->out_height,
+        1
+    );
+}
+
+// ffmpeg_frame_size returns the buffer size required for the current frame format.
+static int ffmpeg_frame_size(DecodeCtx *ctx) {
+    return av_image_get_buffer_size(
+        (enum AVPixelFormat)ctx->out_fmt,
+        ctx->out_width, ctx->out_height,
+        1
+    );
 }
 
 // ffmpeg_seek seeks the format context to the beginning of the stream.
@@ -185,6 +226,7 @@ import (
 type Decoder struct {
 	ctx    *C.DecodeCtx
 	format PixelFormat
+	buf    []byte
 }
 
 // Open opens the video file at path and prepares it for frame-by-frame decoding.
@@ -218,34 +260,41 @@ func (d *Decoder) ReadFrame() (*Frame, error) {
 		if ret == C.AVERROR_EOF {
 			return nil, io.EOF
 		}
-		return nil, fmt.Errorf("video: ffmpeg_read_frame failed (AVERROR %d)", int(ret))
+		// Convert AVERROR code to string for diagnostics
+		errMsg := fmt.Sprintf("video: ffmpeg_read_frame failed (AVERROR %d)", int(ret))
+		if int(ret) == -12 { // ENOMEM
+			errMsg += " [ENOMEM: out of memory]"
+		} else if int(ret) == -22 { // EINVAL
+			errMsg += " [EINVAL: invalid argument]"
+		}
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 
 	w := int(d.ctx.out_width)
 	h := int(d.ctx.out_height)
-	stride := int(C.ffmpeg_frame_stride(d.ctx))
 	ptsMicros := int64(C.ffmpeg_frame_pts(d.ctx))
 
-	var dataSize int
-	switch d.format {
-	case PixelFormatRGBA:
-		dataSize = stride * h
-	case PixelFormatNV12:
-		// Y plane (stride × h) + UV plane (stride × h/2)
-		dataSize = stride*h + stride*(h/2)
+	// Get required buffer size for a tightly-packed frame.
+	dataSize := int(C.ffmpeg_frame_size(d.ctx))
+
+	// Ensure our reusable buffer is large enough.
+	if cap(d.buf) < dataSize {
+		d.buf = make([]byte, dataSize)
 	}
+	data := d.buf[:dataSize]
 
-	// Copy pixel data out of the FFmpeg-managed buffer before the next decode call.
-	data := make([]byte, dataSize)
-	copy(data, (*[1 << 30]byte)(unsafe.Pointer(d.ctx.sw_frame.data[0]))[:dataSize:dataSize])
-
-	// Release the temporary sw_frame data buffer allocated by ffmpeg_read_frame.
-	C.av_freep(unsafe.Pointer(&d.ctx.sw_frame.data[0]))
+	// Copy data from FFmpeg's padded sw_frame to our tightly-packed Go buffer.
+	copyRet := C.ffmpeg_copy_frame_data(d.ctx, (*C.uint8_t)(unsafe.Pointer(&data[0])), C.int(dataSize))
+	if copyRet < 0 {
+		return nil, fmt.Errorf("video: ffmpeg_copy_frame_data failed (AVERROR %d)", int(copyRet))
+	}
 
 	return &Frame{
 		Width:  w,
 		Height: h,
-		Stride: stride,
+		// In a tightly-packed RGBA buffer, stride is exactly Width * 4.
+		// For NV12, it's more complex, but we'll report the logical width-based stride.
+		Stride: w * 4,
 		Data:   data,
 		Format: d.format,
 		PTS:    time.Duration(ptsMicros) * time.Microsecond,

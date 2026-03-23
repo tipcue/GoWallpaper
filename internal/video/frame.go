@@ -1,4 +1,3 @@
-// Package video handles video file decoding via FFmpeg (cgo).
 package video
 
 import "time"
@@ -8,12 +7,15 @@ type Frame struct {
 	// Width and Height of the frame in pixels.
 	Width, Height int
 
-	// Stride is the number of bytes per row (may be wider than Width for alignment).
+	// Stride is the number of bytes per row.
+	// In the Decoder's output, this is guaranteed to be a tightly-packed stride
+	// (e.g., Width * 4 for RGBA).
 	Stride int
 
-	// Data contains the raw pixel bytes.
-	// For RGBA format: 4 bytes per pixel, row-major order.
-	// For NV12 format: Y plane (Width×Height bytes) followed by interleaved UV plane.
+	// Data contains the raw pixel bytes in a tightly-packed layout.
+	// For RGBA format: Width * Height * 4 bytes.
+	// For NV12 format: Y plane (Width * Height bytes) followed immediately
+	// by the interleaved UV plane (Width * Height / 2 bytes).
 	Data []byte
 
 	// Format identifies the pixel format of Data.

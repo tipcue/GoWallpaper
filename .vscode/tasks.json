@@ -1,0 +1,103 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "prepare: dist dir",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "New-Item -ItemType Directory -Force -Path '${workspaceFolder}/dist/livewallpaper/assets' | Out-Null"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "sync: assets to dist",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Copy-Item -Path '${workspaceFolder}/assets/*' -Destination '${workspaceFolder}/dist/livewallpaper/assets' -Recurse -Force"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "build: core (msys2)",
+      "type": "shell",
+      "command": "go",
+      "args": [
+        "build",
+        "-o",
+        "livewallpaper.exe",
+        "./cmd/livewallpaper"
+      ],
+      "options": {
+        "env": {
+          "CGO_ENABLED": "1",
+          "CC": "D:/MSYS2/ucrt64/bin/x86_64-w64-mingw32-gcc.exe",
+          "PKG_CONFIG_PATH": "D:/MSYS2/mingw64/lib/pkgconfig",
+          "PATH": "D:/MSYS2/ucrt64/bin;D:/MSYS2/mingw64/bin;${env:PATH}"
+        }
+      },
+      "problemMatcher": [
+        "$go"
+      ]
+    },
+    {
+      "label": "bundle: runtime dlls",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/bundle-runtime-dlls.ps1",
+        "-ExePath",
+        "${workspaceFolder}/livewallpaper.exe"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "build: livewallpaper (msys2)",
+      "type": "shell",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "build: core (msys2)",
+        "bundle: runtime dlls"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test: all (msys2)",
+      "type": "shell",
+      "command": "go",
+      "args": [
+        "test",
+        "./..."
+      ],
+      "options": {
+        "env": {
+          "CGO_ENABLED": "1",
+          "CC": "D:/MSYS2/ucrt64/bin/x86_64-w64-mingw32-gcc.exe",
+          "PKG_CONFIG_PATH": "D:/MSYS2/mingw64/lib/pkgconfig",
+          "PATH": "D:/MSYS2/ucrt64/bin;D:/MSYS2/mingw64/bin;${env:PATH}"
+        }
+      },
+      "group": "test",
+      "problemMatcher": [
+        "$go"
+      ]
+    }
+  ]
+}

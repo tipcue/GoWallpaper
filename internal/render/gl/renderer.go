@@ -36,6 +36,9 @@ type Renderer struct {
 	winW, winH     int
 	frameW, frameH int
 	mode           ScaleMode
+
+	uMin, uMax, vMin, vMax float32
+	xMin, xMax, yMin, yMax float32
 }
 
 // New creates and initialises a Renderer.
@@ -135,30 +138,38 @@ func (r *Renderer) Upload(data []byte, frameW, frameH int) {
 }
 
 // Draw renders the current texture to the framebuffer.
-// It recomputes the vertex quad according to the ScaleMode each call.
+// It recomputes the vertex quad according to the ScaleMode only when necessary.
 func (r *Renderer) Draw() {
 	gl.UseProgram(r.program)
 	gl.Viewport(0, 0, int32(r.winW), int32(r.winH))
 	gl.Clear(gl.COLOR_BUFFER_BIT)
 
-	// Compute UV offsets / scale based on ScaleMode.
-	uMin, uMax, vMin, vMax := r.computeUV()
+	// Compute geometry (UV offsets and vertex positions) based on ScaleMode.
+	uMin, uMax, vMin, vMax, xMin, xMax, yMin, yMax := r.computeGeometry()
 
-	// Update the quad vertices with the computed UV region.
-	vertices := []float32{
-		-1, 1, uMin, vMin,
-		-1, -1, uMin, vMax,
-		1, -1, uMax, vMax,
+	// Update the quad vertices if any dimension changed.
+	if uMin != r.uMin || uMax != r.uMax || vMin != r.vMin || vMax != r.vMax ||
+		xMin != r.xMin || xMax != r.xMax || yMin != r.yMin || yMax != r.yMax {
 
-		-1, 1, uMin, vMin,
-		1, -1, uMax, vMax,
-		1, 1, uMax, vMin,
+		r.uMin, r.uMax, r.vMin, r.vMax = uMin, uMax, vMin, vMax
+		r.xMin, r.xMax, r.yMin, r.yMax = xMin, xMax, yMin, yMax
+
+		vertices := []float32{
+			xMin, yMax, uMin, vMin,
+			xMin, yMin, uMin, vMax,
+			xMax, yMin, uMax, vMax,
+
+			xMin, yMax, uMin, vMin,
+			xMax, yMin, uMax, vMax,
+			xMax, yMax, uMax, vMin,
+		}
+
+		gl.BindVertexArray(r.vao)
+		gl.BindBuffer(gl.ARRAY_BUFFER, r.vbo)
+		gl.BufferSubData(gl.ARRAY_BUFFER, 0, len(vertices)*4, gl.Ptr(vertices))
 	}
 
 	gl.BindVertexArray(r.vao)
-	gl.BindBuffer(gl.ARRAY_BUFFER, r.vbo)
-	gl.BufferSubData(gl.ARRAY_BUFFER, 0, len(vertices)*4, gl.Ptr(vertices))
-
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, r.texture)
 	loc := gl.GetUniformLocation(r.program, gl.Str("tex\x00"))
@@ -169,38 +180,52 @@ func (r *Renderer) Draw() {
 	gl.BindVertexArray(0)
 }
 
-// computeUV returns UV coordinates [uMin,uMax] × [vMin,vMax] that implement
-// the requested ScaleMode given the current window and frame dimensions.
-func (r *Renderer) computeUV() (uMin, uMax, vMin, vMax float32) {
-	if r.frameW == 0 || r.frameH == 0 {
-		return 0, 1, 0, 1
+// computeGeometry returns UV coordinates and vertex positions [xMin,xMax] x [yMin,yMax]
+// that implement the requested ScaleMode.
+func (r *Renderer) computeGeometry() (uMin, uMax, vMin, vMax, xMin, xMax, yMin, yMax float32) {
+	// Default: full screen, full texture
+	uMin, uMax, vMin, vMax = 0, 1, 0, 1
+	xMin, xMax, yMin, yMax = -1, 1, -1, 1
+
+	if r.frameW == 0 || r.frameH == 0 || r.winW == 0 || r.winH == 0 {
+		return
 	}
+
+	winAR := float32(r.winW) / float32(r.winH)
+	frameAR := float32(r.frameW) / float32(r.frameH)
 
 	switch r.mode {
 	case ScaleStretch:
-		return 0, 1, 0, 1
+		// Keep defaults: stretch full texture to full screen.
 
 	case ScaleCover:
 		// Scale so the frame completely covers the window (may crop).
-		winAR := float32(r.winW) / float32(r.winH)
-		frameAR := float32(r.frameW) / float32(r.frameH)
 		if frameAR > winAR {
 			// Frame is wider than window: crop left/right.
 			visible := winAR / frameAR
 			margin := (1 - visible) / 2
-			return margin, 1 - margin, 0, 1
+			uMin, uMax = margin, 1-margin
+		} else {
+			// Frame is taller than window: crop top/bottom.
+			visible := frameAR / winAR
+			margin := (1 - visible) / 2
+			vMin, vMax = margin, 1-margin
 		}
-		// Frame is taller than window: crop top/bottom.
-		visible := frameAR / winAR
-		margin := (1 - visible) / 2
-		return 0, 1, margin, 1 - margin
 
-	default: // ScaleContain
+	case ScaleContain:
 		// Fit the entire frame inside the window (letterbox / pillarbox).
-		// Full frame UV is used here; the quad vertices would need to be
-		// scaled to preserve aspect ratio for a complete implementation.
-		return 0, 1, 0, 1
+		if frameAR > winAR {
+			// Frame is wider than window: pillarbox (vertical bars).
+			visible := winAR / frameAR
+			yMin, yMax = -visible, visible
+		} else {
+			// Frame is taller than window: letterbox (horizontal bars).
+			visible := frameAR / winAR
+			xMin, xMax = -visible, visible
+		}
 	}
+
+	return
 }
 
 // Resize updates the stored window dimensions for subsequent Draw calls.

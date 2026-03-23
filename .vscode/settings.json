@@ -1,0 +1,14 @@
+{
+    "Codegeex.RepoIndex": true,
+    "go.toolsEnvVars": {
+        "PKG_CONFIG_PATH": "D:\\MSYS2\\mingw64\\lib\\pkgconfig",
+        "CGO_ENABLED": "1"
+    },
+    "go.buildFlags": [
+        "-tags=windows"
+    ],
+    "go.lintOnSave": "workspace",
+    "go.lintFlags": [
+        "--build-tags=windows"
+    ]
+}
