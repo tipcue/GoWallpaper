@@ -1,6 +1,6 @@
 # GoWallpaper Build Script
 # Usage: ./build.ps1 [target]
-# Targets: build (default), test, run, clean, all
+# Targets: build (default), cli, gui, test, run, clean, all
 
 param(
     [string]$Target = "build"
@@ -17,7 +17,7 @@ Write-Host "Working directory: $(Get-Location)" -ForegroundColor Gray
 
 switch ($Target.ToLower()) {
     "build" {
-        Write-Host "`n[1/2] Building main program..." -ForegroundColor Green
+        Write-Host "`n[1/3] Building CLI (livewallpaper)..." -ForegroundColor Green
         go build -o livewallpaper.exe ./cmd/livewallpaper
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] livewallpaper.exe built successfully" -ForegroundColor Green
@@ -26,7 +26,16 @@ switch ($Target.ToLower()) {
             exit 1
         }
 
-        Write-Host "`n[2/2] Building diagnostic tool..." -ForegroundColor Green
+        Write-Host "`n[2/3] Building GUI (gowallpaper-gui)..." -ForegroundColor Green
+        go build -o gowallpaper-gui.exe ./cmd/gowallpaper-gui
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] gowallpaper-gui.exe built successfully" -ForegroundColor Green
+        } else {
+            Write-Host "[FAILED] Build failed" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "`n[3/3] Building diagnostic tool..." -ForegroundColor Green
         go build -o ffmpeg-diag.exe ./cmd/ffmpeg-diag
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] ffmpeg-diag.exe built successfully" -ForegroundColor Green
@@ -36,6 +45,28 @@ switch ($Target.ToLower()) {
         }
         
         Write-Host "`n[OK] All builds completed!`n" -ForegroundColor Green
+    }
+
+    "cli" {
+        Write-Host "`nBuilding CLI (livewallpaper)..." -ForegroundColor Green
+        go build -o livewallpaper.exe ./cmd/livewallpaper
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] livewallpaper.exe built successfully" -ForegroundColor Green
+        } else {
+            Write-Host "[FAILED] Build failed" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    "gui" {
+        Write-Host "`nBuilding GUI (gowallpaper-gui)..." -ForegroundColor Green
+        go build -o gowallpaper-gui.exe ./cmd/gowallpaper-gui
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] gowallpaper-gui.exe built successfully" -ForegroundColor Green
+        } else {
+            Write-Host "[FAILED] Build failed" -ForegroundColor Red
+            exit 1
+        }
     }
 
     "test" {
@@ -81,6 +112,7 @@ switch ($Target.ToLower()) {
     "clean" {
         Write-Host "`nCleaning build artifacts..." -ForegroundColor Green
         Remove-Item -Force -ErrorAction SilentlyContinue livewallpaper.exe
+        Remove-Item -Force -ErrorAction SilentlyContinue gowallpaper-gui.exe
         Remove-Item -Force -ErrorAction SilentlyContinue ffmpeg-diag.exe
         go clean ./cmd/...
         Write-Host "[OK] Cleanup completed!`n" -ForegroundColor Green
@@ -96,7 +128,9 @@ switch ($Target.ToLower()) {
     default {
         Write-Host "Usage: ./build.ps1 [target]" -ForegroundColor Yellow
         Write-Host "Available targets:"
-        Write-Host "  build      - Build main program and diagnostic tool (default)"
+        Write-Host "  build      - Build CLI, GUI, and diagnostic tool (default)"
+        Write-Host "  cli        - Build CLI only (livewallpaper.exe)"
+        Write-Host "  gui        - Build GUI only (gowallpaper-gui.exe)"
         Write-Host "  test       - Run unit tests"
         Write-Host "  run        - Run livewallpaper"
         Write-Host "  run-diag   - Run FFmpeg diagnostic tool"
@@ -104,7 +138,9 @@ switch ($Target.ToLower()) {
         Write-Host "  all        - Run full build sequence"
         Write-Host ""
         Write-Host "Examples:"
-        Write-Host "  ./build.ps1          # Build"
+        Write-Host "  ./build.ps1          # Build all"
+        Write-Host "  ./build.ps1 gui      # Build GUI only"
+        Write-Host "  ./build.ps1 cli      # Build CLI only"
         Write-Host "  ./build.ps1 test     # Run tests"
         Write-Host "  ./build.ps1 run      # Run program"
     }

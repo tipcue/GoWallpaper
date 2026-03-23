@@ -1,0 +1,24 @@
+# Build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Debug / log files produced at runtime
+livewallpaper.log
+gowallpaper-gui.log
+
+# Local config (users store preferences here; not committed)
+assets/config.local.json
+
+# Editor / IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Go build cache (never committed)
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
