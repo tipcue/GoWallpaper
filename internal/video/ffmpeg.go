@@ -77,10 +77,12 @@ static int ffmpeg_open(const char *path, int out_fmt, DecodeCtx **ctx_out) {
     ctx->out_height = ctx->codec_ctx->height;
     ctx->out_fmt    = out_fmt;
 
+    // BILINEAR is enough for full-screen wallpaper scaling and is much
+    // cheaper than BICUBIC on the CPU path every frame.
     ctx->sws_ctx = sws_getContext(
         ctx->codec_ctx->width, ctx->codec_ctx->height, ctx->codec_ctx->pix_fmt,
         ctx->out_width, ctx->out_height, (enum AVPixelFormat)out_fmt,
-        SWS_BICUBIC, NULL, NULL, NULL);
+        SWS_BILINEAR, NULL, NULL, NULL);
     if (!ctx->sws_ctx) { ret = AVERROR(ENOMEM); goto fail; }
 
     ctx->packet   = av_packet_alloc();
@@ -227,6 +229,10 @@ type Decoder struct {
 	ctx    *C.DecodeCtx
 	format PixelFormat
 	buf    []byte
+	// frame is reused across ReadFrame calls to avoid a per-frame heap alloc.
+	// Callers must treat the returned *Frame as valid only until the next
+	// ReadFrame or Close on this Decoder.
+	frame Frame
 }
 
 // Open opens the video file at path and prepares it for frame-by-frame decoding.
@@ -254,6 +260,10 @@ func Open(path string, format PixelFormat) (*Decoder, error) {
 
 // ReadFrame decodes and returns the next video frame.
 // Returns (nil, io.EOF) at end-of-stream so callers can loop.
+//
+// The returned *Frame is owned by the Decoder and is overwritten on the next
+// successful ReadFrame (or invalidated by Close). Callers that need to keep
+// pixel data across calls must copy Frame.Data.
 func (d *Decoder) ReadFrame() (*Frame, error) {
 	ret := C.ffmpeg_read_frame(d.ctx)
 	if ret < 0 {
@@ -289,16 +299,15 @@ func (d *Decoder) ReadFrame() (*Frame, error) {
 		return nil, fmt.Errorf("video: ffmpeg_copy_frame_data failed (AVERROR %d)", int(copyRet))
 	}
 
-	return &Frame{
-		Width:  w,
-		Height: h,
-		// In a tightly-packed RGBA buffer, stride is exactly Width * 4.
-		// For NV12, it's more complex, but we'll report the logical width-based stride.
-		Stride: w * 4,
-		Data:   data,
-		Format: d.format,
-		PTS:    time.Duration(ptsMicros) * time.Microsecond,
-	}, nil
+	d.frame.Width = w
+	d.frame.Height = h
+	// Tightly-packed RGBA: stride is Width * 4. NV12 reports the same logical
+	// Y-plane stride for callers that only need a row pitch hint.
+	d.frame.Stride = w * 4
+	d.frame.Data = data
+	d.frame.Format = d.format
+	d.frame.PTS = time.Duration(ptsMicros) * time.Microsecond
+	return &d.frame, nil
 }
 
 // Seek rewinds the stream to the beginning for looped playback.

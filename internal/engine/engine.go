@@ -199,7 +199,14 @@ func runEngine(ctx context.Context, cfg *Config, initResult chan<- error) {
 		return
 	}
 	glfwWin.MakeContextCurrent()
-	glfw.SwapInterval(1)
+	// Avoid double-throttling: when the user sets FPSLimit we pace with
+	// time.Sleep below and leave the swap chain unthrottled. Otherwise use
+	// vsync so idle wallpapers do not burn cycles racing the GPU.
+	if cfg.FPSLimit > 0 {
+		glfw.SwapInterval(0)
+	} else {
+		glfw.SwapInterval(1)
+	}
 
 	// ── 3. Reparent into WorkerW ─────────────────────────────────────────────
 	hwnd, err := win.HWNDFromGLFW(glfwWin)

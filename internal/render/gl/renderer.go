@@ -32,6 +32,8 @@ type Renderer struct {
 	vao     uint32
 	vbo     uint32
 	texture uint32
+	// texLoc is the sampler2D uniform location, cached once at New time.
+	texLoc int32
 
 	winW, winH     int
 	frameW, frameH int
@@ -51,9 +53,11 @@ func New(winW, winH int, mode ScaleMode) (*Renderer, error) {
 
 	r := &Renderer{
 		program: prog,
-		winW:    winW,
-		winH:    winH,
-		mode:    mode,
+		// Cache once — GetUniformLocation is not free and Draw is per-frame.
+		texLoc: gl.GetUniformLocation(prog, gl.Str("tex\x00")),
+		winW:   winW,
+		winH:   winH,
+		mode:   mode,
 	}
 
 	r.setupQuad()
@@ -172,8 +176,7 @@ func (r *Renderer) Draw() {
 	gl.BindVertexArray(r.vao)
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, r.texture)
-	loc := gl.GetUniformLocation(r.program, gl.Str("tex\x00"))
-	gl.Uniform1i(loc, 0)
+	gl.Uniform1i(r.texLoc, 0)
 
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 

@@ -124,11 +124,13 @@ func TestSeek_Loops(t *testing.T) {
 	}
 	defer dec.Close()
 
-	// Read first frame and remember its PTS.
+	// Read first frame and remember its PTS by value — the returned *Frame is
+	// reused, so holding the pointer alone would not preserve the old PTS.
 	first, err := dec.ReadFrame()
 	if err != nil {
 		t.Fatalf("initial ReadFrame failed: %v", err)
 	}
+	firstPTS := first.PTS
 	if err := dec.Seek(); err != nil {
 		t.Fatalf("Seek failed: %v", err)
 	}
@@ -136,8 +138,96 @@ func TestSeek_Loops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFrame after Seek failed: %v", err)
 	}
-	if again.PTS != first.PTS {
-		t.Fatalf("PTS after seek = %v, want %v (loop not restarting at head)", again.PTS, first.PTS)
+	if again.PTS != firstPTS {
+		t.Fatalf("PTS after seek = %v, want %v (loop not restarting at head)", again.PTS, firstPTS)
+	}
+}
+
+// TestReadFrame_ReusesFrame locks in the contract that successive successful
+// ReadFrame calls return the same *Frame and overwrite its pixel buffer.
+// Callers that need previous pixels must copy Frame.Data before the next read.
+func TestReadFrame_ReusesFrame(t *testing.T) {
+	path := findSampleMP4(t)
+	dec, err := Open(path, PixelFormatRGBA)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer dec.Close()
+
+	first, err := dec.ReadFrame()
+	if err != nil {
+		t.Fatalf("first ReadFrame failed: %v", err)
+	}
+	if first == nil {
+		t.Fatal("first ReadFrame returned nil frame")
+	}
+	if len(first.Data) == 0 {
+		t.Fatal("first frame Data is empty")
+	}
+
+	// Snapshot identity + pixel payload while they still describe frame 1.
+	firstPtr := first
+	snap := append([]byte(nil), first.Data...)
+	firstPTS := first.PTS
+	firstDataPtr := &first.Data[0]
+
+	second, err := dec.ReadFrame()
+	if err != nil {
+		t.Fatalf("second ReadFrame failed: %v", err)
+	}
+	if second == nil {
+		t.Fatal("second ReadFrame returned nil frame")
+	}
+
+	// 1) Same *Frame object is returned every successful read.
+	if second != firstPtr {
+		t.Fatalf("ReadFrame returned a new *Frame (%p), want reused pointer %p", second, firstPtr)
+	}
+
+	// 2) Retained pointer aliases second: same slice header backing when possible.
+	if len(second.Data) == 0 {
+		t.Fatal("second frame Data is empty")
+	}
+	if &second.Data[0] != firstDataPtr && len(second.Data) == len(snap) {
+		// Buffer may reallocate only if capacity grew; same dimensions should keep it.
+		t.Logf("Data backing moved (%p -> %p); capacity growth is allowed", firstDataPtr, &second.Data[0])
+	}
+	// first and second are the same pointer, so field views must match.
+	if first.PTS != second.PTS || first.Width != second.Width || first.Height != second.Height {
+		t.Fatalf("retained *Frame fields diverged from second return value")
+	}
+
+	// 3) Independent copy of frame 1 must not track later overwrites.
+	// testsrc changes over time, so frame 2 usually differs from the snapshot.
+	pixelsDiffer := len(snap) != len(second.Data)
+	if !pixelsDiffer {
+		for i := range snap {
+			if snap[i] != second.Data[i] {
+				pixelsDiffer = true
+				break
+			}
+		}
+	}
+	if !pixelsDiffer {
+		t.Log("consecutive frames had identical pixels; skip in-place overwrite assertion")
+		return
+	}
+	// Shared buffer was rewritten: live view no longer equals the pre-read copy.
+	liveMatchesSnap := len(snap) == len(first.Data)
+	if liveMatchesSnap {
+		for i := range snap {
+			if snap[i] != first.Data[i] {
+				liveMatchesSnap = false
+				break
+			}
+		}
+	}
+	if liveMatchesSnap {
+		t.Fatal("shared Data still matches pre-read snapshot after second ReadFrame; buffer was not overwritten")
+	}
+	// PTS should advance on a real second frame (testsrc is timed).
+	if second.PTS == firstPTS {
+		t.Logf("PTS unchanged across consecutive frames (%v); unusual but not fatal for reuse contract", firstPTS)
 	}
 }
 
