@@ -6,10 +6,38 @@ param(
     [string]$Target = "build"
 )
 
-# Set environment variables for CGO and FFmpeg
+# Locate the MSYS2 toolchain. Override by setting $env:MSYS2_PREFIX
+# (e.g. "C:\msys64") before invoking this script.
+if (-not $env:MSYS2_PREFIX) { $env:MSYS2_PREFIX = "D:/MSYS2" }
+
+# Keep CC and pkg-config on the same MSYS2 environment (ucrt64). Mixing
+# ucrt64 gcc with mingw64 pkg-config/libs is a common source of subtle
+# ABI/DLL load failures.
 $env:CGO_ENABLED = 1
-$env:CC = "D:/MSYS2/ucrt64/bin/x86_64-w64-mingw32-gcc.exe"
-$env:PKG_CONFIG_PATH = "D:/MSYS2/mingw64/lib/pkgconfig"
+$env:CC          = "$env:MSYS2_PREFIX/ucrt64/bin/x86_64-w64-mingw32-gcc.exe"
+$env:PKG_CONFIG_PATH = "$env:MSYS2_PREFIX/ucrt64/lib/pkgconfig"
+
+# CGO invokes gcc with short names like "as", "cpp", "ld" that must be
+# discoverable on PATH. More importantly, FFmpeg DLLs must resolve against
+# the matching ucrt64 runtime — Git for Windows also ships a mingw64/bin
+# with colliding names (libgcc_s_seh-1.dll, libwinpthread-1.dll, ...). If
+# Git's directory sits first, test binaries fail at load time with
+# 0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND). Always force CC's directory
+# to the front, even when it already appears later in PATH.
+$ccDir = (Split-Path $env:CC -Parent).TrimEnd('\', '/')
+$env:PATH = (
+    @($ccDir) + (
+        $env:PATH -split ';' |
+        Where-Object { $_ -and ($_.TrimEnd('\', '/') -ne $ccDir) }
+    )
+) -join ';'
+
+# Fail fast with a clear message if the toolchain is not where we expect.
+if (-not (Test-Path $env:CC)) {
+    Write-Host "ERROR: C compiler not found at '$env:CC'." -ForegroundColor Red
+    Write-Host "Set `$env:MSYS2_PREFIX to your MSYS2 install (e.g. 'C:\msys64') and retry." -ForegroundColor Yellow
+    exit 1
+}
 
 Write-Host "=== GoWallpaper Build Script ===" -ForegroundColor Cyan
 Write-Host "Target: $Target" -ForegroundColor Yellow
@@ -72,16 +100,24 @@ switch ($Target.ToLower()) {
     "test" {
         Write-Host "`nRunning unit tests..." -ForegroundColor Green
         Write-Host "Note: Tests require video file assets/sample.mp4" -ForegroundColor Yellow
-        
+        $failed = $false
+
         Write-Host "`nTesting video module..." -ForegroundColor Cyan
         go test -v ./internal/video/...
-        
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
+
         Write-Host "`nTesting win module..." -ForegroundColor Cyan
         go test -v ./internal/win/...
-        
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
+
         Write-Host "`nTesting render module..." -ForegroundColor Cyan
         go test -v ./internal/render/gl/...
-        
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
+
+        if ($failed) {
+            Write-Host "`n[FAILED] One or more test packages failed`n" -ForegroundColor Red
+            exit 1
+        }
         Write-Host "`n[OK] Unit tests completed!`n" -ForegroundColor Green
     }
 

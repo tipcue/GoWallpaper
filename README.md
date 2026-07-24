@@ -33,8 +33,18 @@ Set the required environment variables (adjust paths to match your MSYS2 install
 
 ```powershell
 $env:CGO_ENABLED = 1
-$env:CC          = "C:\msys64\ucrt64\bin\gcc.exe"
+$env:CC          = "C:\msys64\ucrt64\bin\x86_64-w64-mingw32-gcc.exe"
 $env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
+# Put the matching ucrt64 bin first so FFmpeg/runtime DLLs don't collide with
+# Git for Windows' own mingw64/bin (which can cause 0xc0000139 at test load time).
+$env:PATH        = "C:\msys64\ucrt64\bin;$env:PATH"
+```
+
+If you use `build.ps1`, it derives `CC` and `PKG_CONFIG_PATH` from `$env:MSYS2_PREFIX` (default `D:/MSYS2`) and forces the ucrt64 toolchain directory to the front of `PATH`. Override the MSYS2 location with:
+
+```powershell
+$env:MSYS2_PREFIX = "C:\msys64"
+.\build.ps1
 ```
 
 ### CLI
