@@ -1,60 +1,105 @@
+# Copy non-system DLL dependencies next to a GoWallpaper binary so it can run
+# on machines without MSYS2 on PATH.
+#
+# Usage:
+#   .\scripts\bundle-runtime-dlls.ps1
+#   .\scripts\bundle-runtime-dlls.ps1 -ExePath gowallpaper-gui.exe
+#   .\scripts\bundle-runtime-dlls.ps1 -Force
+#   $env:MSYS2_PREFIX = "C:\msys64"; .\scripts\bundle-runtime-dlls.ps1
+#
+# Paths default from $env:MSYS2_PREFIX (same convention as build.ps1). Search
+# order is ucrt64 first — do not put mingw64 ahead of it, or you risk mixing
+# CRT/runtime DLLs with a ucrt64-linked binary.
+
 param(
     [string]$ExePath = "livewallpaper.exe",
-    [string]$ObjdumpPath = "D:/MSYS2/ucrt64/bin/objdump.exe",
-    [string[]]$SearchDirs = @("D:/MSYS2/mingw64/bin", "D:/MSYS2/ucrt64/bin")
+    [string]$ObjdumpPath = "",
+    [string[]]$SearchDirs = @(),
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $env:MSYS2_PREFIX) { $env:MSYS2_PREFIX = "D:/MSYS2" }
+$prefix = $env:MSYS2_PREFIX.TrimEnd('\', '/')
+
+if (-not $ObjdumpPath) {
+    $ObjdumpPath = "$prefix/ucrt64/bin/objdump.exe"
+}
+if ($SearchDirs.Count -eq 0) {
+    # ucrt64 only by default — matches build.ps1's CC/PKG_CONFIG_PATH.
+    $SearchDirs = @("$prefix/ucrt64/bin")
+}
 
 if (!(Test-Path $ExePath)) {
     throw "Executable not found: $ExePath"
 }
 if (!(Test-Path $ObjdumpPath)) {
-    throw "objdump not found: $ObjdumpPath"
+    throw "objdump not found: $ObjdumpPath (set `$env:MSYS2_PREFIX or -ObjdumpPath)"
 }
 
 $exeFull = (Resolve-Path $ExePath).Path
 $targetDir = Split-Path -Parent $exeFull
-$stampPath = Join-Path $targetDir ".bundle-stamp"
+# Per-exe stamp so bundling multiple binaries in one dir does not thrash.
+$stampPath = Join-Path $targetDir (".bundle-stamp." + [IO.Path]::GetFileName($exeFull))
 
+# OS / UCRT forwarders that must come from the target machine, not MSYS2.
+# Also skip the entire api-ms-win-* family (UCRT API-set stubs).
 $systemDlls = @{
     "advapi32.dll" = $true
     "bcrypt.dll" = $true
-    "comdlg32.dll" = $true
+    "bcryptprimitives.dll" = $true
     "combase.dll" = $true
+    "comdlg32.dll" = $true
+    "crypt32.dll" = $true
+    "dnsapi.dll" = $true
+    "dwrite.dll" = $true
     "gdi32.dll" = $true
+    "gdi32full.dll" = $true
+    "gdiplus.dll" = $true
     "imm32.dll" = $true
+    "iphlpapi.dll" = $true
     "kernel32.dll" = $true
+    "kernelbase.dll" = $true
+    "msimg32.dll" = $true
     "msvcrt.dll" = $true
+    "ncrypt.dll" = $true
     "ntdll.dll" = $true
     "ole32.dll" = $true
+    "oleaut32.dll" = $true
     "opengl32.dll" = $true
     "rpcrt4.dll" = $true
+    "sechost.dll" = $true
     "secur32.dll" = $true
+    "setupapi.dll" = $true
     "shell32.dll" = $true
+    "shlwapi.dll" = $true
+    "ucrtbase.dll" = $true
     "user32.dll" = $true
+    "userenv.dll" = $true
+    "usp10.dll" = $true
+    "uxtheme.dll" = $true
+    "version.dll" = $true
+    "win32u.dll" = $true
     "winmm.dll" = $true
     "ws2_32.dll" = $true
     "wsock32.dll" = $true
-    "iphlpapi.dll" = $true
-    "gdiplus.dll" = $true
-    "dnsapi.dll" = $true
-    "shlwapi.dll" = $true
-    "crypt32.dll" = $true
-    "dwrite.dll" = $true
-    "usp10.dll" = $true
-    "bcryptprimitives.dll" = $true
-    "ncrypt.dll" = $true
-    "userenv.dll" = $true
-    "msimg32.dll" = $true
-    "api-ms-win-core-synch-l1-2-0.dll" = $true
+}
+
+function Test-SystemDll([string]$name) {
+    if ($systemDlls.ContainsKey($name)) { return $true }
+    if ($name.StartsWith("api-ms-win-")) { return $true }
+    if ($name.StartsWith("ext-ms-")) { return $true }
+    return $false
 }
 
 $exeStamp = (Get-Item $exeFull).LastWriteTimeUtc.Ticks
-if (Test-Path $stampPath) {
+$searchKey = ($SearchDirs | ForEach-Object { $_.TrimEnd('\', '/').ToLowerInvariant() }) -join "|"
+$stampValue = "$exeStamp|$searchKey"
+if (-not $Force -and (Test-Path $stampPath)) {
     $previousStamp = Get-Content $stampPath -ErrorAction SilentlyContinue
-    if ($previousStamp -eq "$exeStamp") {
-        Write-Host "Runtime DLL bundle is up to date; skipping scan."
+    if ($previousStamp -eq $stampValue) {
+        Write-Host "Runtime DLL bundle is up to date; skipping scan. (use -Force to rescan)"
         Write-Host "Output directory:" $targetDir
         exit 0
     }
@@ -83,17 +128,21 @@ function Resolve-DllPath([string]$dllName) {
 $queue = New-Object System.Collections.Generic.Queue[string]
 $seen = New-Object System.Collections.Generic.HashSet[string]
 $copied = New-Object System.Collections.Generic.HashSet[string]
+$skippedFresh = 0
 $warnedMissing = New-Object System.Collections.Generic.HashSet[string]
 
 $queue.Enqueue($exeFull)
 $seen.Add($exeFull) | Out-Null
+
+Write-Host "Bundling runtime DLLs for:" $exeFull
+Write-Host "Search dirs:" ($SearchDirs -join "; ")
 
 while ($queue.Count -gt 0) {
     $current = $queue.Dequeue()
     $imports = Get-Imports $current
 
     foreach ($dll in $imports) {
-        if ($systemDlls.ContainsKey($dll)) {
+        if (Test-SystemDll $dll) {
             continue
         }
 
@@ -108,11 +157,12 @@ while ($queue.Count -gt 0) {
 
         $dest = Join-Path $targetDir $dll
         $needCopy = $true
-        if (Test-Path $dest) {
+        if (-not $Force -and (Test-Path $dest)) {
             $srcTime = (Get-Item $resolved).LastWriteTimeUtc
             $dstTime = (Get-Item $dest).LastWriteTimeUtc
             if ($dstTime -ge $srcTime) {
                 $needCopy = $false
+                $skippedFresh++
             }
         }
 
@@ -128,6 +178,9 @@ while ($queue.Count -gt 0) {
     }
 }
 
-Set-Content -Path $stampPath -Value "$exeStamp"
-Write-Host "Bundled DLL count:" $copied.Count
+Set-Content -Path $stampPath -Value $stampValue
+Write-Host "Copied:" $copied.Count " Already fresh:" $skippedFresh " Missing:" $warnedMissing.Count
 Write-Host "Output directory:" $targetDir
+if ($warnedMissing.Count -gt 0) {
+    exit 1
+}

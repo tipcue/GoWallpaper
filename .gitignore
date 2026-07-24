@@ -3,6 +3,8 @@
 *.dll
 *.so
 *.dylib
+.bundle-stamp
+.bundle-stamp.*
 
 # Debug / log files produced at runtime
 livewallpaper.log

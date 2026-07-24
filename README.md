@@ -65,7 +65,21 @@ Or use the provided build script:
 .\build.ps1          # builds both CLI and GUI
 .\build.ps1 gui      # builds GUI only
 .\build.ps1 cli      # builds CLI only
+.\build.ps1 bundle   # copy FFmpeg/runtime DLLs next to built exes
 ```
+
+### Portable runtime (optional)
+
+`go build` links against MSYS2 FFmpeg DLLs. To run the exe on a machine without MSYS2 on `PATH`, copy dependencies beside the binary:
+
+```powershell
+.\build.ps1 bundle
+# or directly:
+.\scripts\bundle-runtime-dlls.ps1 -ExePath livewallpaper.exe
+.\scripts\bundle-runtime-dlls.ps1 -ExePath gowallpaper-gui.exe -Force
+```
+
+The script uses `$env:MSYS2_PREFIX` (default `D:/MSYS2`) and searches **ucrt64/bin only**, matching the build toolchain.
 
 ---
 

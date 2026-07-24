@@ -145,13 +145,40 @@ switch ($Target.ToLower()) {
         }
     }
 
+    "bundle" {
+        Write-Host "`nBundling runtime DLLs next to built executables..." -ForegroundColor Green
+        $bundleScript = Join-Path $PSScriptRoot "scripts\bundle-runtime-dlls.ps1"
+        if (!(Test-Path $bundleScript)) {
+            Write-Host "[ERROR] Missing $bundleScript" -ForegroundColor Red
+            exit 1
+        }
+        $failed = $false
+        foreach ($exe in @("livewallpaper.exe", "gowallpaper-gui.exe")) {
+            if (!(Test-Path $exe)) {
+                Write-Host "[SKIP] $exe not found (build it first)" -ForegroundColor Yellow
+                continue
+            }
+            Write-Host "`n--- $exe ---" -ForegroundColor Cyan
+            & $bundleScript -ExePath $exe
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+        }
+        if ($failed) {
+            Write-Host "`n[FAILED] Bundle completed with missing dependencies`n" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "`n[OK] Bundle completed!`n" -ForegroundColor Green
+    }
+
     "clean" {
         Write-Host "`nCleaning build artifacts..." -ForegroundColor Green
         Remove-Item -Force -ErrorAction SilentlyContinue livewallpaper.exe
         Remove-Item -Force -ErrorAction SilentlyContinue gowallpaper-gui.exe
         Remove-Item -Force -ErrorAction SilentlyContinue ffmpeg-diag.exe
+        Remove-Item -Force -ErrorAction SilentlyContinue .bundle-stamp
+        Remove-Item -Force -ErrorAction SilentlyContinue .bundle-stamp.*
         go clean ./cmd/...
         Write-Host "[OK] Cleanup completed!`n" -ForegroundColor Green
+        Write-Host "Note: runtime DLLs copied by 'bundle' are left in place; delete them manually if needed." -ForegroundColor Gray
     }
 
     "all" {
@@ -168,6 +195,7 @@ switch ($Target.ToLower()) {
         Write-Host "  cli        - Build CLI only (livewallpaper.exe)"
         Write-Host "  gui        - Build GUI only (gowallpaper-gui.exe)"
         Write-Host "  test       - Run unit tests"
+        Write-Host "  bundle     - Copy FFmpeg/runtime DLLs next to built exes"
         Write-Host "  run        - Run livewallpaper"
         Write-Host "  run-diag   - Run FFmpeg diagnostic tool"
         Write-Host "  clean      - Clean build artifacts"

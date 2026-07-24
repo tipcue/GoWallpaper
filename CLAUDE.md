@@ -17,11 +17,14 @@ CGO is mandatory and must be pointed at an MSYS2 UCRT64 toolchain. The `build.ps
 .\build.ps1 cli          # build livewallpaper.exe only
 .\build.ps1 gui          # build gowallpaper-gui.exe only
 .\build.ps1 test         # run unit tests for video, win, render/gl
+.\build.ps1 bundle       # copy FFmpeg/runtime DLLs next to built exes (portable run)
 .\build.ps1 run          # run livewallpaper.exe
 .\build.ps1 run-diag     # run ffmpeg-diag with first mp4 in assets/
-.\build.ps1 clean        # remove *.exe and go clean
+.\build.ps1 clean        # remove *.exe and go clean (leaves bundled DLLs)
 .\build.ps1 all          # clean + build + test
 ```
+
+`scripts/bundle-runtime-dlls.ps1` walks PE imports via `objdump`, copies non-system DLLs from `$MSYS2_PREFIX/ucrt64/bin` next to the exe. Same `MSYS2_PREFIX` convention as the build script; do not search mingw64 first. Bundled `*.dll` and `.bundle-stamp` are gitignored.
 
 For manual builds, set env first (values must match your MSYS2 install):
 ```powershell
