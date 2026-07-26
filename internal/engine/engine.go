@@ -254,14 +254,23 @@ func runEngine(ctx context.Context, cfg *Config, initResult chan<- error) {
 	// Initialisation succeeded – unblock the caller.
 	signal(nil)
 
-	// ── 5. Main render loop ──────────────────────────────────────────────────
-	var frameDuration time.Duration
+	// ── 5. Start environment monitors ───────────────────────────────────────
+	watchdog := win.StartWatchdog(2 * time.Second)
+	defer watchdog.Stop()
+
+	detector := StartFullscreenDetector(3 * time.Second)
+	defer detector.Stop()
+
+	// ── 6. Main render loop ──────────────────────────────────────────────────
+	// Pace by media PTS when available; FPSLimit is only an upper bound.
+	var pacer Pacer
 	if cfg.FPSLimit > 0 {
-		frameDuration = time.Second / time.Duration(cfg.FPSLimit)
+		pacer.MinFrame = time.Second / time.Duration(cfg.FPSLimit)
 	}
 
 	frameCount := 0
 	loopStart := time.Now()
+	suspended := false
 
 	for !glfwWin.ShouldClose() {
 		// Honour stop requests between frames.
@@ -271,7 +280,44 @@ func runEngine(ctx context.Context, cfg *Config, initResult chan<- error) {
 		default:
 		}
 
-		frameStart := time.Now()
+		// Handle desktop environment changes (Explorer restart, display change).
+		select {
+		case ev := <-watchdog.Events:
+			switch ev.Kind {
+			case win.ExplorerRestarted:
+				log.Printf("[INFO] engine: explorer restarted, reattaching wallpaper")
+				if err := win.Reattach(hwnd); err != nil {
+					log.Printf("[ERROR] engine: reattach failed: %v", err)
+				}
+				pacer.Reset()
+			case win.DisplayChanged:
+				log.Printf("[INFO] engine: display changed, resizing wallpaper")
+				if err := win.MakeFullscreen(hwnd); err != nil {
+					log.Printf("[ERROR] engine: resize failed: %v", err)
+				}
+				win.PlaceAtBottom(hwnd)
+				pacer.Reset()
+			}
+		default:
+		}
+
+		// Handle fullscreen app suspension.
+		select {
+		case suspended = <-detector.Suspended:
+			if suspended {
+				// Reset frame timing so we don't burst-decode on resume.
+				pacer.Reset()
+			}
+		default:
+		}
+
+		// While suspended, idle without decoding or presenting frames.
+		if suspended {
+			glfw.PollEvents()
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		frameCount++
 
 		frame, err := dec.ReadFrame()
@@ -282,6 +328,7 @@ func runEngine(ctx context.Context, cfg *Config, initResult chan<- error) {
 						log.Printf("engine: seek error: %v", seekErr)
 						return
 					}
+					pacer.Reset()
 					frameCount = 0
 					loopStart = time.Now()
 					continue
@@ -293,6 +340,12 @@ func runEngine(ctx context.Context, cfg *Config, initResult chan<- error) {
 			continue
 		}
 
+		// Wait until this frame's PTS (and FPS cap) before presenting.
+		pacer.Wait(ctx, frame.PTS)
+		if ctx.Err() != nil {
+			return
+		}
+
 		renderer.Upload(frame.Data, frame.Width, frame.Height)
 		renderer.Draw()
 		glfwWin.SwapBuffers()
@@ -302,12 +355,6 @@ func runEngine(ctx context.Context, cfg *Config, initResult chan<- error) {
 			elapsed := time.Since(loopStart)
 			log.Printf("[INFO] engine: %d frames, avg %.1f fps",
 				frameCount, float64(frameCount)/elapsed.Seconds())
-		}
-
-		if frameDuration > 0 {
-			if sleep := frameDuration - time.Since(frameStart); sleep > 0 {
-				time.Sleep(sleep)
-			}
 		}
 	}
 }

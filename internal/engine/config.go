@@ -18,7 +18,10 @@ type Config struct {
 	Mode string `json:"mode"`
 	// Loop restarts playback at end-of-stream when true.
 	Loop bool `json:"loop"`
-	// FPSLimit caps the render rate (0 means unlimited).
+	// FPSLimit is the maximum present rate in frames per second.
+	// Playback is paced primarily by each frame's media PTS; FPSLimit only
+	// caps how fast frames may be shown (0 is treated as default 30 via
+	// applyDefaults).
 	FPSLimit int `json:"fpsLimit"`
 	// LastDir is the last folder the user browsed (GUI preference).
 	LastDir string `json:"lastDir,omitempty"`
