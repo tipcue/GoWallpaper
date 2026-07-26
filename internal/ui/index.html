@@ -145,6 +145,13 @@ footer {
 
 footer label { color: var(--text-dim); display: flex; align-items: center; gap: 5px; }
 
+footer.lifecycle {
+  border-top: none;
+  padding-top: 6px;
+  padding-bottom: 8px;
+  gap: 20px;
+}
+
 footer select, footer input[type="number"] {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -205,6 +212,15 @@ footer input[type="checkbox"] { accent-color: var(--accent); }
     <button class="btn" id="btn-stop" onclick="stop()" disabled>Stop</button>
     <button class="btn" id="btn-next" onclick="next()" disabled>Next</button>
   </div>
+</footer>
+
+<footer class="lifecycle">
+  <label>
+    <input type="checkbox" id="chk-autostart" onchange="toggleAutostart()"> Start with Windows
+  </label>
+  <label>
+    <input type="checkbox" id="chk-recovery" onchange="toggleRecovery()"> Auto-restart on crash
+  </label>
 </footer>
 
 <script>
@@ -329,6 +345,33 @@ function updateButtons() {
   document.getElementById('btn-next').disabled = files.length === 0;
 }
 
+// ── Lifecycle ────────────────────────────────────────────────────────────
+
+async function toggleAutostart() {
+  const enabled = document.getElementById('chk-autostart').checked;
+  try { await window.setAutostart(enabled); } catch (e) {
+    showError(e);
+    document.getElementById('chk-autostart').checked = !enabled;
+  }
+}
+
+async function toggleRecovery() {
+  const enabled = document.getElementById('chk-recovery').checked;
+  try { await window.setRecovery(enabled); } catch (e) {
+    showError(e);
+    document.getElementById('chk-recovery').checked = !enabled;
+  }
+}
+
+async function loadLifecycleState() {
+  try {
+    const json = await window.getLifecycleState();
+    const state = JSON.parse(json);
+    document.getElementById('chk-autostart').checked = state.autostart;
+    document.getElementById('chk-recovery').checked = state.recovery;
+  } catch (e) { /* non-critical */ }
+}
+
 // ── Init: load persisted state ───────────────────────────────────────────
 
 (async function init() {
@@ -349,6 +392,7 @@ function updateButtons() {
     }
   } catch (e) { /* first run, no config */ }
   updateButtons();
+  loadLifecycleState();
 })();
 </script>
 </body>

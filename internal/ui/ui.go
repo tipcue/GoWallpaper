@@ -17,6 +17,7 @@ import (
 
 	webview2 "github.com/jchv/go-webview2"
 
+	"github.com/tipcue/GoWallpaper/internal/app"
 	"github.com/tipcue/GoWallpaper/internal/engine"
 )
 
@@ -168,6 +169,43 @@ func Run(cfgPath string) error {
 		return nil
 	}); err != nil {
 		return fmt.Errorf("bind stopVideo: %w", err)
+	}
+
+	// ── Lifecycle bindings ───────────────────────────────────────────────────
+
+	// getLifecycleState returns JSON with autostart and recovery status.
+	if err := w.Bind("getLifecycleState", func() (string, error) {
+		state := struct {
+			Autostart bool `json:"autostart"`
+			Recovery  bool `json:"recovery"`
+		}{
+			Autostart: app.IsAutostartEnabled(),
+			Recovery:  app.IsRecoveryRegistered(),
+		}
+		data, err := json.Marshal(state)
+		return string(data), err
+	}); err != nil {
+		return fmt.Errorf("bind getLifecycleState: %w", err)
+	}
+
+	// setAutostart enables or disables logon autostart via registry.
+	if err := w.Bind("setAutostart", func(enabled bool) error {
+		if enabled {
+			return app.EnableAutostart()
+		}
+		return app.DisableAutostart()
+	}); err != nil {
+		return fmt.Errorf("bind setAutostart: %w", err)
+	}
+
+	// setRecovery enables or disables crash recovery via Task Scheduler.
+	if err := w.Bind("setRecovery", func(enabled bool) error {
+		if enabled {
+			return app.RegisterRecovery()
+		}
+		return app.UnregisterRecovery()
+	}); err != nil {
+		return fmt.Errorf("bind setRecovery: %w", err)
 	}
 
 	// ── Engine stop callback ─────────────────────────────────────────────────
