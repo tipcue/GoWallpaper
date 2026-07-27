@@ -19,7 +19,7 @@ var (
 )
 
 func main() {
-	fmt.Println("=== DESKTOP HIERARCHY ===\n")
+	fmt.Println("=== DESKTOP HIERARCHY ===")
 
 	// Find Progman
 	progman, _, _ := procFindWindow.Call(

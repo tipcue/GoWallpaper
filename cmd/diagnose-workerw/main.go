@@ -24,7 +24,7 @@ type RECT struct {
 }
 
 func main() {
-	fmt.Println("=== Enhanced WorkerW Diagnostic ===\n")
+	fmt.Println("=== Enhanced WorkerW Diagnostic ===")
 
 	// Find first WorkerW
 	firstWorkerW := findFirstWorkerW()

@@ -23,7 +23,7 @@ type RECT struct {
 }
 
 func main() {
-	fmt.Println("=== ALL WINDOWS DIAGNOSTIC ===\n")
+	fmt.Println("=== ALL WINDOWS DIAGNOSTIC ===")
 
 	// Enumerate all windows
 	windowCount := 0
