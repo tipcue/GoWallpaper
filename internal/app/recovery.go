@@ -12,7 +12,7 @@ import (
 const taskName = "GoWallpaper"
 
 // RegisterRecovery creates a Task Scheduler task that starts the app on logon
-// and restarts it every 60 seconds if it terminates unexpectedly.
+// and restarts it 1 minute after it terminates unexpectedly.
 // This provides crash recovery without a separate watchdog process.
 func RegisterRecovery() error {
 	exe, err := os.Executable()
@@ -26,7 +26,7 @@ func RegisterRecovery() error {
 	// Create the task:
 	//   /SC ONLOGON   — trigger on user logon
 	//   /RL LIMITED   — run without elevation (no UAC prompt)
-	//   /RI 60        — restart interval: 60 seconds after failure
+	//   /RI 1         — restart interval: 1 minute after failure
 	//   /TR           — command to run
 	//   /F            — force create (overwrite)
 	args := []string{
@@ -35,7 +35,7 @@ func RegisterRecovery() error {
 		"/TR", fmt.Sprintf(`"%s" --autostart`, exe),
 		"/SC", "ONLOGON",
 		"/RL", "LIMITED",
-		"/RI", "60",
+		"/RI", "1",
 		"/F",
 	}
 

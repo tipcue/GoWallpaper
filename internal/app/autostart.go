@@ -5,6 +5,8 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -52,13 +54,11 @@ func IsAutostartEnabled() bool {
 	if err != nil || val == "" {
 		return false
 	}
-	// Check that the registered path contains our exe name.
 	exe, err := os.Executable()
 	if err != nil {
 		return false
 	}
-	_ = exe
-	return true
+	return strings.Contains(val, filepath.Base(exe))
 }
 
 // ── Registry helpers ─────────────────────────────────────────────────────
@@ -90,15 +90,18 @@ func setRegistryString(subKey, name, value string) error {
 	defer procRegCloseKey.Call(uintptr(hKey))
 
 	namePtr, _ := syscall.UTF16PtrFromString(name)
-	valuePtr, _ := syscall.UTF16PtrFromString(value)
-	valueBytes := (len(value) + 1) * 2 // UTF-16 + null terminator
+	valueUTF16, err := syscall.UTF16FromString(value)
+	if err != nil {
+		return fmt.Errorf("encode value: %w", err)
+	}
+	valueBytes := len(valueUTF16) * 2 // includes null terminator from UTF16FromString
 
 	ret, _, callErr := procRegSetValueExW.Call(
 		uintptr(hKey),
 		uintptr(unsafe.Pointer(namePtr)),
 		0,
 		regSz,
-		uintptr(unsafe.Pointer(valuePtr)),
+		uintptr(unsafe.Pointer(&valueUTF16[0])),
 		uintptr(valueBytes),
 	)
 	if ret != 0 {

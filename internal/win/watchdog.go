@@ -10,10 +10,7 @@ import (
 )
 
 var (
-	kernel32                    = syscall.NewLazyDLL("kernel32.dll")
 	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
-	procOpenProcess             = kernel32.NewProc("OpenProcess")
-	procCloseHandle             = kernel32.NewProc("CloseHandle")
 )
 
 // EventKind identifies the type of desktop environment change detected.

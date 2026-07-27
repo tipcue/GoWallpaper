@@ -15,8 +15,8 @@ var (
 	procGetForegroundWindow = suspendUser32.NewProc("GetForegroundWindow")
 	procGetWindowRect       = suspendUser32.NewProc("GetWindowRect")
 	procGetSystemMetrics    = suspendUser32.NewProc("GetSystemMetrics")
-	procGetWindowLongW      = suspendUser32.NewProc("GetWindowLongW")
 	procIsWindowVisible     = suspendUser32.NewProc("IsWindowVisible")
+	procGetClassNameW       = suspendUser32.NewProc("GetClassNameW")
 )
 
 // rect mirrors the Win32 RECT structure.
@@ -146,5 +146,3 @@ func isShellWindow(hwnd uintptr) bool {
 	}
 	return false
 }
-
-var procGetClassNameW = suspendUser32.NewProc("GetClassNameW")
