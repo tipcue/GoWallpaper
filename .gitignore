@@ -18,6 +18,10 @@ assets/config.local.json
 .idea/
 *.code-workspace
 
+# AI assistant tools
+.claude/
+.codex/
+
 # Go build cache (never committed)
 vendor/
 
